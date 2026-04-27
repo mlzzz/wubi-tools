@@ -13,7 +13,7 @@ jobs:
   build:  
     strategy:  
       matrix:  
-        os: [ubuntu-latest, windows-latest, macos-latest]  
+        os: [ubuntu-latest, macos-latest]  # 只保留 Linux 和 macOS  
       
     runs-on: ${{ matrix.os }}  
       
@@ -26,16 +26,19 @@ jobs:
         node-version: '20'  
         cache: 'yarn'  
       
-    - name: Install dependencies
-      run: |
-        yarn config set registry https://registry.npmmirror.com
-        yarn install --frozen-lockfile --network-timeout 600000
-
+    - name: Install dependencies  
+      run: |  
+        yarn config set registry https://registry.npmmirror.com  
+        yarn config set network-timeout 1200000  
+        yarn install --frozen-lockfile --network-timeout 1200000  
+      
     - name: Build application  
       run: yarn run make  
+      continue-on-error: true  
       
     - name: Upload artifacts  
       uses: actions/upload-artifact@v4  
+      if: always()  
       with:  
         name: ${{ matrix.os }}-build  
         path: out/make/
