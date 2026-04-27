@@ -1,52 +1,185 @@
-name: Build and Release  
-  
-on:  
-  push:  
-    tags:  
-      - 'v*'  
-  workflow_dispatch:  
-  
-env:  
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  
-  
-jobs:  
-  build:  
-    strategy:  
-      matrix:  
-        os: [ubuntu-latest, macos-latest]  
-      
-    runs-on: ${{ matrix.os }}  
-      
-    steps:  
-    - uses: actions/checkout@v4  
-      
-    - name: Setup Node.js  
-      uses: actions/setup-node@v4  
-      with:  
-        node-version: '20'  
-        cache: 'yarn'  
-      
-    - name: Install dependencies  
-      run: |  
-        yarn config set registry https://registry.npmmirror.com  
-        yarn config set network-timeout 1200000  
-        yarn install --frozen-lockfile --network-timeout 1200000  
-      
-    - name: Build application  
-      run: yarn run make  
-      
-    - name: Upload artifacts  
-      uses: actions/upload-artifact@v4  
-      with:  
-        name: ${{ matrix.os }}-build  
-        path: out/make/  
-      
-    - name: Release  
-      uses: softprops/action-gh-release@v1  
-      if: startsWith(github.ref, 'refs/tags/')  
-      with:  
-        files: out/make/**  
-        draft: false  
-        prerelease: false  
-      env:  
-        GITHUB_TOKEN: ${{ secrets.MLZZZ_PAT_TOKEN }}
+name: Build Electron App
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送 v1.0.0 这样的标签时触发
+    branches:
+      - main  # 也可以手动触发或推送时触发
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-macos-arm:
+    name: Build macOS ARM (Apple Silicon)
+    runs-on: macos-latest  # GitHub 提供的 macOS runner
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'  # 使用 Node.js 20 LTS
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/  # 使用国内镜像加速
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+
+      - name: Build executable for macOS ARM
+        run: npm run make
+        env:
+          # macOS 代码签名（可选，没有证书也可以构建）
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload artifacts (DMG and ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm-build
+          path: |
+            out/make/*.dmg
+            out/make/*.zip
+            out/make/*.dmg.blockmap
+          retention-days: 7
+
+  build-macos-intel:
+    name: Build macOS Intel (x64)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+
+      - name: Build executable for macOS Intel (x64)
+        run: npm run make
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # 强制 x64 架构
+          npm_config_arch: x64
+          ELECTRON_ARCH: x64
+
+      - name: Upload artifacts (DMG and ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-intel-build
+          path: |
+            out/make/*.dmg
+            out/make/*.zip
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+
+      - name: Build executable for Windows
+        run: npm run make
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: List generated files
+        run: |
+          Get-ChildItem -Recurse out/make/
+        shell: pwsh
+
+      - name: Upload artifacts (exe and installer)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            out/make/**/*.exe
+            out/make/**/*.nupkg
+            out/make/**/RELEASES
+          retention-days: 7
+
+  build-linux:
+    name: Build Linux (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+
+      - name: Build executable for Linux
+        run: npm run make
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload artifacts (deb, rpm, AppImage)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            out/make/**/*.deb
+            out/make/**/*.rpm
+            out/make/**/*.AppImage
+            out/make/**/*.snap
+          retention-days: 7
+
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-macos-arm, build-macos-intel, build-windows, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')  # 仅当推送标签时创建 Release
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List all artifacts
+        run: |
+          find artifacts -type f
+          ls -la artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/macos-arm-build/*
+            artifacts/macos-intel-build/*
+            artifacts/windows-build/*
+            artifacts/linux-build/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.MLZZZ_PAT_TOKEN }}
