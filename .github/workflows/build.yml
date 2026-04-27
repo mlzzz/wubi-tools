@@ -1,17 +1,25 @@
-name: Build Electron App
+name: Build Electron App for All Platforms
 
 on:
   push:
     tags:
-      - 'v*'  # 当推送 v1.0.0 这样的标签时触发
+      - 'v*'  # 推送标签时触发（如 v1.0.0）
     branches:
-      - main  # 也可以手动触发或推送时触发
+      - main
+      - master
   workflow_dispatch:  # 允许手动触发
 
+# 全局环境变量
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 解决 Node.js 20 弃用警告
+  ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+  ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+
 jobs:
+  # ==================== macOS ARM (Apple Silicon) ====================
   build-macos-arm:
     name: Build macOS ARM (Apple Silicon)
-    runs-on: macos-latest  # GitHub 提供的 macOS runner
+    runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,22 +27,30 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'  # 使用 Node.js 20 LTS
-          cache: 'npm'
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Install Yarn
+        run: npm install -g yarn
 
       - name: Install dependencies
-        run: npm ci
+        run: yarn install --frozen-lockfile --network-timeout 600000
         env:
-          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/  # 使用国内镜像加速
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
           ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
 
-      - name: Build executable for macOS ARM
-        run: npm run make
+      - name: Build for macOS ARM
+        run: yarn run make
         env:
-          # macOS 代码签名（可选，没有证书也可以构建）
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          CSC_IDENTITY_AUTO_DISCOVERY: false  # 跳过代码签名
 
-      - name: Upload artifacts (DMG and ZIP)
+      - name: List generated files
+        run: |
+          echo "Generated files in out/make:"
+          ls -la out/make/ || echo "Directory not found"
+          find out/make -type f 2>/dev/null || echo "No files found"
+
+      - name: Upload artifacts (DMG & ZIP)
         uses: actions/upload-artifact@v4
         with:
           name: macos-arm-build
@@ -43,7 +59,9 @@ jobs:
             out/make/*.zip
             out/make/*.dmg.blockmap
           retention-days: 7
+          if-no-files-found: warn
 
+  # ==================== macOS Intel (x64) ====================
   build-macos-intel:
     name: Build macOS Intel (x64)
     runs-on: macos-latest
@@ -55,23 +73,31 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'yarn'
+
+      - name: Install Yarn
+        run: npm install -g yarn
 
       - name: Install dependencies
-        run: npm ci
+        run: yarn install --frozen-lockfile --network-timeout 600000
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
           ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
 
-      - name: Build executable for macOS Intel (x64)
-        run: npm run make
+      - name: Build for macOS Intel (x64)
+        run: yarn run make
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          # 强制 x64 架构
           npm_config_arch: x64
           ELECTRON_ARCH: x64
 
-      - name: Upload artifacts (DMG and ZIP)
+      - name: List generated files
+        run: |
+          echo "Generated files in out/make:"
+          ls -la out/make/ || echo "Directory not found"
+          find out/make -type f 2>/dev/null || echo "No files found"
+
+      - name: Upload artifacts (DMG & ZIP)
         uses: actions/upload-artifact@v4
         with:
           name: macos-intel-build
@@ -79,7 +105,9 @@ jobs:
             out/make/*.dmg
             out/make/*.zip
           retention-days: 7
+          if-no-files-found: warn
 
+  # ==================== Windows ====================
   build-windows:
     name: Build Windows
     runs-on: windows-latest
@@ -91,25 +119,31 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'yarn'
+
+      - name: Install Yarn
+        run: npm install -g yarn
+        shell: pwsh
 
       - name: Install dependencies
-        run: npm ci
+        run: yarn install --frozen-lockfile --network-timeout 600000
+        shell: pwsh
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
           ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
 
-      - name: Build executable for Windows
-        run: npm run make
+      - name: Build for Windows
+        run: yarn run make
+        shell: pwsh
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: List generated files
         run: |
-          Get-ChildItem -Recurse out/make/
+          Get-ChildItem -Recurse out/make/ | Select-Object FullName
         shell: pwsh
 
-      - name: Upload artifacts (exe and installer)
+      - name: Upload artifacts (exe & installer)
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
@@ -117,8 +151,11 @@ jobs:
             out/make/**/*.exe
             out/make/**/*.nupkg
             out/make/**/RELEASES
+            out/make/**/*.msi
           retention-days: 7
+          if-no-files-found: warn
 
+  # ==================== Linux (Ubuntu) ====================
   build-linux:
     name: Build Linux (Ubuntu)
     runs-on: ubuntu-latest
@@ -130,18 +167,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'yarn'
+
+      - name: Install Yarn
+        run: npm install -g yarn
 
       - name: Install dependencies
-        run: npm ci
+        run: yarn install --frozen-lockfile --network-timeout 600000
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
           ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
 
-      - name: Build executable for Linux
-        run: npm run make
+      - name: Build for Linux
+        run: yarn run make
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: List generated files
+        run: |
+          echo "Generated files in out/make:"
+          ls -la out/make/ || echo "Directory not found"
+          find out/make -type f 2>/dev/null || echo "No files found"
 
       - name: Upload artifacts (deb, rpm, AppImage)
         uses: actions/upload-artifact@v4
@@ -152,13 +198,16 @@ jobs:
             out/make/**/*.rpm
             out/make/**/*.AppImage
             out/make/**/*.snap
+            out/make/**/*.pacman
           retention-days: 7
+          if-no-files-found: warn
 
+  # ==================== 创建 GitHub Release ====================
   create-release:
-    name: Create Release
+    name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [build-macos-arm, build-macos-intel, build-windows, build-linux]
-    if: startsWith(github.ref, 'refs/tags/v')  # 仅当推送标签时创建 Release
+    if: startsWith(github.ref, 'refs/tags/v')  # 仅在推送标签时创建 Release
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -167,8 +216,11 @@ jobs:
 
       - name: List all artifacts
         run: |
+          echo "All downloaded artifacts:"
           find artifacts -type f
-          ls -la artifacts/
+          echo ""
+          echo "File sizes:"
+          find artifacts -type f -exec ls -lh {} \;
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -181,5 +233,20 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## 五笔码表助手 ${{ github.ref_name }}
+            
+            感谢使用五笔码表助手！
+            
+            ### 下载说明
+            - macOS 用户请下载 `.dmg` 文件
+            - Windows 用户请下载 `.exe` 安装程序
+            - Linux 用户请下载 `.deb` 或 `.rpm` 文件
+            
+            ### 系统要求
+            - macOS 10.15+
+            - Windows 10/11
+            - Ubuntu 18.04+ / 其他 Linux 发行版
         env:
           GITHUB_TOKEN: ${{ secrets.MLZZZ_PAT_TOKEN }}
